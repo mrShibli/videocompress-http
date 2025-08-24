@@ -23,6 +23,7 @@ import (
 // ======================
 
 const (
+	// Max upload size accepted by the server (adjust if you need more/less)
 	maxUploadSize = 2 << 30 // 2 GB
 )
 
@@ -48,20 +49,20 @@ func withExt(p, newExt string) string {
 
 type compressOpts struct {
 	Codec      string        // h264|h265|copy
-	CRF        int           // CPU encoders quality
+	CRF        int           // used for CPU encoders and as a "quality hint"
 	Preset     string        // ultrafast..placebo (CPU encoders)
 	Scale      string        // e.g. 1280:-2 or 1920:1080
 	Audio      string        // aac|opus|copy
-	AB         string        // audio bitrate
+	AB         string        // audio bitrate, e.g. 128k
 	HW         string        // videotoolbox|none
 	OutExt     string        // .mp4 (recommended)
 	Timeout    time.Duration // overall job timeout
-	SpeedMode  string        // ultra_fast|super_fast|fast|balanced|quality|ai
+	SpeedMode  string        // ultra_fast|super_fast|fast|balanced|quality
 	Resolution string        // 360p|480p|720p|1080p|1440p|2160p|original
-	TargetSecs int           // AI time budget in seconds (default 120)
 }
 
 func (o *compressOpts) normalize() {
+	// sensible defaults
 	if o.Codec == "" {
 		o.Codec = "h264"
 	}
@@ -72,7 +73,7 @@ func (o *compressOpts) normalize() {
 		o.AB = "128k"
 	}
 	if o.HW == "" {
-		o.HW = "none" // VPS-safe default
+		o.HW = "none" // default to CPU (most reliable across VPS)
 	}
 	if o.OutExt == "" {
 		o.OutExt = ".mp4"
@@ -81,65 +82,17 @@ func (o *compressOpts) normalize() {
 		o.Timeout = 45 * time.Minute
 	}
 	if o.SpeedMode == "" {
-		o.SpeedMode = "ai"
+		o.SpeedMode = "balanced"
 	}
 	if o.Resolution == "" {
 		o.Resolution = "original"
 	}
-	if o.TargetSecs <= 0 {
-		o.TargetSecs = 120 // default 2 minutes
-	}
-	// NOTE: applySpeedMode will be called AFTER AI logic finalizes SpeedMode.
+	o.applySpeedMode()
 	o.applyResolution()
 }
 
-// Throughput model (very rough MB/s per mode).
-// Adjust for your hardware if needed.
-func throughputMBps(speed string) float64 {
-	switch speed {
-	case "ultra_fast":
-		return 8.0
-	case "super_fast":
-		return 5.0
-	case "fast":
-		return 3.0
-	case "balanced":
-		return 2.0
-	case "quality":
-		return 1.2
-	default:
-		return 2.0
-	}
-}
-
-// Estimate time by size & profile (seconds)
-func estimateTimeSecs(sizeMB int64, speed string) int {
-	t := throughputMBps(speed)
-	if t <= 0 {
-		t = 2.0
-	}
-	secs := float64(sizeMB) / t
-	// add small overhead
-	secs *= 1.15
-	return int(secs)
-}
-
-func chooseSpeedBySize(sizeMB int64) string {
-	switch {
-	case sizeMB >= 700:
-		return "ultra_fast"
-	case sizeMB >= 200:
-		return "super_fast"
-	case sizeMB >= 50:
-		return "fast"
-	case sizeMB >= 10:
-		return "balanced"
-	default:
-		return "balanced"
-	}
-}
-
-// Apply speed profile → updates CRF/Preset/AB
+// Speed profiles primarily tune CRF/Preset for CPU mode.
+// For VideoToolbox we’ll map CRF → a reasonable bitrate later.
 func (o *compressOpts) applySpeedMode() {
 	switch o.SpeedMode {
 	case "ultra_fast":
@@ -183,35 +136,35 @@ func (o *compressOpts) applyResolution() {
 	case "2160p":
 		o.Scale = "3840:2160"
 	case "original":
-		// keep original
+		// keep original, leave o.Scale = ""
 	default:
 		// unknown -> keep original
 	}
 }
 
-// Extra safety for very small inputs
-func (o *compressOpts) tinyInputSafety(fileSize int64) {
+// Extra safety for small inputs: gently re-encode instead of over-compressing
+func (o *compressOpts) adjustForFileSize(fileSize int64) {
 	sizeMB := fileSize / (1024 * 1024)
-	if sizeMB < 10 {
+	if sizeMB < 10 { // tiny inputs
 		o.Codec = "h264"
 		o.Audio = "aac"
-		o.Scale = ""
-		o.CRF = 22
+		o.Scale = ""       // preserve resolution
+		o.CRF = 22         // light touch to avoid artifacts
 		o.Preset = "veryfast"
-		o.HW = "none"
+		o.HW = "none"      // CPU = most stable
 	}
 }
 
-// Translate options → ffmpeg args
+// Translate options → ffmpeg arguments
 func buildFFmpegArgs(inPath, outPath string, o compressOpts) []string {
 	args := []string{"-y", "-hide_banner", "-loglevel", "error", "-i", inPath}
 
-	// scale
+	// Scaling (fast bilinear is fine for speed modes)
 	if o.Scale != "" && strings.ToLower(o.Codec) != "copy" {
 		args = append(args, "-vf", "scale="+o.Scale+":flags=fast_bilinear")
 	}
 
-	// codec
+	// Pick video encoder
 	vcodec := ""
 	switch strings.ToLower(o.Codec) {
 	case "copy":
@@ -230,6 +183,7 @@ func buildFFmpegArgs(inPath, outPath string, o compressOpts) []string {
 		}
 	}
 
+	// Set video params
 	if vcodec == "copy" {
 		args = append(args, "-c:v", "copy")
 	} else {
@@ -237,9 +191,11 @@ func buildFFmpegArgs(inPath, outPath string, o compressOpts) []string {
 
 		switch vcodec {
 		case "libx264", "libx265":
+			// CPU encoders: CRF + preset
 			args = append(args, "-crf", strconv.Itoa(o.CRF), "-preset", o.Preset)
 		case "h264_videotoolbox", "hevc_videotoolbox":
-			// map CRF→bitrate for hardware encoders
+			// VideoToolbox prefers a bitrate target; map CRF → bitrate.
+			// Feel free to tweak these if you know your content.
 			bitrate := "3M"
 			switch {
 			case o.CRF <= 20:
@@ -256,28 +212,30 @@ func buildFFmpegArgs(inPath, outPath string, o compressOpts) []string {
 			args = append(args, "-b:v", bitrate)
 		}
 
-		// browser compatibility
+		// MP4 playback compatibility (only when re-encoding video)
 		if strings.ToLower(o.OutExt) == ".mp4" {
 			args = append(args, "-pix_fmt", "yuv420p")
 		}
 	}
 
-	// audio
+	// Audio
 	switch strings.ToLower(o.Audio) {
 	case "copy":
 		args = append(args, "-c:a", "copy")
 	case "opus":
 		args = append(args, "-c:a", "libopus", "-b:a", o.AB)
-	default:
+	default: // aac
 		args = append(args, "-c:a", "aac", "-b:a", o.AB)
 	}
 
-	// play nice on the web
+	// Web playback: moov atom first + let ffmpeg decide threads
 	args = append(args, "-movflags", "+faststart", "-threads", "0", outPath)
+
 	return args
 }
 
-// run ffmpeg synchronously; if HW fails, retry CPU
+// Run ffmpeg and WAIT for it to finish (critical!)
+// If VideoToolbox fails, automatically retry with CPU.
 func runFFmpeg(ctx context.Context, inPath, outPath string, o compressOpts, logWriter io.Writer) error {
 	o.normalize()
 	args := buildFFmpegArgs(inPath, outPath, o)
@@ -290,8 +248,9 @@ func runFFmpeg(ctx context.Context, inPath, outPath string, o compressOpts, logW
 		return nil
 	}
 
+	// Auto-fallback: if HW failed, retry CPU
 	if strings.Contains(strings.ToLower(o.HW), "videotoolbox") {
-		fmt.Fprintln(logWriter, "VideoToolbox failed; falling back to CPU.")
+		fmt.Fprintln(logWriter, "VideoToolbox failed; falling back to CPU (libx264/libx265).")
 		o.HW = "none"
 		args = buildFFmpegArgs(inPath, outPath, o)
 		cmd = exec.CommandContext(ctx, "ffmpeg", args...)
@@ -324,7 +283,6 @@ pre{background:#f3f4f6;padding:12px;border-radius:6px;overflow:auto}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px}
 .card{border:1px solid #e5e7eb;border-radius:8px;padding:8px}
 .card input{width:auto}
-small{color:#6b7280}
 </style>
 
 <h1>Video Compress</h1>
@@ -337,21 +295,14 @@ small{color:#6b7280}
 
   <div class="grid">
     <div class="card">
-      <label>Mode</label>
+      <label>Speed mode</label>
       <select name="speed">
-        <option value="ai" selected>AI (auto by size & time)</option>
-        <option value="balanced">Balanced</option>
+        <option value="balanced" selected>Balanced</option>
         <option value="fast">Fast</option>
         <option value="super_fast">Super Fast</option>
         <option value="ultra_fast">Ultra Fast</option>
         <option value="quality">Quality</option>
       </select>
-      <small>AI picks speed by file size + your time budget.</small>
-    </div>
-    <div class="card">
-      <label>Time budget (seconds)</label>
-      <input type="number" name="target_secs" value="120" min="30" step="10">
-      <small>Example: 120 = 2 minutes</small>
     </div>
     <div class="card">
       <label>Resolution</label>
@@ -408,8 +359,10 @@ small{color:#6b7280}
 
 <h3>cURL example</h3>
 <pre>
-# AI mode, 2-minute budget
-curl -F "file=@input.mp4" -F "speed=ai" -F "target_secs=120" http://localhost:8080/compress -o out.mp4
+curl -F "file=@input.mp4" \
+     -F "speed=balanced" \
+     -F "resolution=original" \
+     http://localhost:8080/compress -o output.mp4
 </pre>
 `))
 
@@ -418,7 +371,7 @@ func uploadPage(w http.ResponseWriter, r *http.Request) {
 	_ = uploadTpl.Execute(w, nil)
 }
 
-// Cleanly save a multipart file to disk (unused path, kept for reference)
+// Cleanly save a multipart file to disk
 func savePartToTemp(part *multipart.Part, suggested string) (string, error) {
 	tmpDir := os.TempDir()
 	name := filepath.Base(suggested)
@@ -426,36 +379,36 @@ func savePartToTemp(part *multipart.Part, suggested string) (string, error) {
 		name = fmt.Sprintf("upload_%d", time.Now().UnixNano())
 	}
 	dst := filepath.Join(tmpDir, name)
+
 	f, err := os.Create(dst)
 	if err != nil {
 		return "", err
 	}
 	defer f.Close()
+
 	_, err = io.Copy(f, part)
 	return dst, err
 }
 
-// Parse options (after ParseMultipartForm)
+// Parse all options (after ParseMultipartForm)
 func parseOpts(r *http.Request) (compressOpts, error) {
 	o := compressOpts{}
+
 	get := func(key, def string) string {
 		if v := r.FormValue(key); v != "" {
 			return v
 		}
 		return def
 	}
+
 	o.Codec = get("codec", "h264")
 	o.Audio = get("audio", "aac")
 	o.AB = get("ab", "")
 	o.HW = get("hw", "none")
 	o.OutExt = get("outExt", ".mp4")
-	o.SpeedMode = get("speed", "ai")
+	o.SpeedMode = get("speed", "balanced")
 	o.Resolution = get("resolution", "original")
-	if ts := get("target_secs", "120"); ts != "" {
-		if n, err := strconv.Atoi(ts); err == nil && n > 0 {
-			o.TargetSecs = n
-		}
-	}
+
 	o.normalize()
 	return o, nil
 }
@@ -471,6 +424,7 @@ func compressHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Parse the multipart form FIRST so FormValue works
 	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
 		http.Error(w, "expecting multipart/form-data: "+err.Error(), http.StatusBadRequest)
 		return
@@ -498,63 +452,25 @@ func compressHandler(w http.ResponseWriter, r *http.Request) {
 	out.Close()
 	defer os.Remove(inPath)
 
-	// Parse options
+	// Build options (now that form is parsed)
 	opts, err := parseOpts(r)
 	if err != nil {
 		http.Error(w, err.Error(), 400)
 		return
 	}
 
-	// File info
-	st, _ := os.Stat(inPath)
-	sizeMB := int64(0)
-	if st != nil {
-		sizeMB = st.Size() / (1024 * 1024)
+	// Adjust for tiny files for safety
+	if st, err := os.Stat(inPath); err == nil {
+		opts.adjustForFileSize(st.Size())
 	}
 
-	// AI mode: decide speed by size + time budget
-	if opts.SpeedMode == "ai" {
-		// Base choice by size first
-		base := chooseSpeedBySize(sizeMB)
-
-		// Special rule (your request):
-		// For 200MB–2GB prefer ultra_fast,
-		// BUT if ~200–250MB and target_secs >= 180, don't force ultra_fast.
-		if sizeMB >= 200 && sizeMB < 2048 {
-			if sizeMB <= 250 && opts.TargetSecs >= 180 {
-				base = "balanced"
-			} else {
-				base = "ultra_fast"
-			}
-		}
-
-		// Try to pick the fastest mode that satisfies the time budget.
-		// Order fastest→slower.
-		candidates := []string{"ultra_fast", "super_fast", "fast", "balanced", "quality"}
-
-		var chosen string
-		for _, c := range candidates {
-			est := estimateTimeSecs(sizeMB, c)
-			if est <= opts.TargetSecs {
-				chosen = c
-				break
-			}
-		}
-		if chosen == "" {
-			// None meet the time budget; use the base (usually fastest).
-			chosen = base
-		}
-		opts.SpeedMode = chosen
-	}
-
-	// Small-file safety
-	opts.tinyInputSafety(st.Size())
-
-	// Apply profile params
-	opts.applySpeedMode()
-
+	// Output path
 	outPath := withExt(inPath, "_compressed"+opts.OutExt)
+	defer func() {
+		// Keep output on disk so user can re-download if they refresh; delete if you prefer
+	}()
 
+	// Run ffmpeg synchronously and WAIT until it finishes
 	ctx, cancel := context.WithTimeout(r.Context(), opts.Timeout)
 	defer cancel()
 
@@ -563,14 +479,14 @@ func compressHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// validate output
+	// Validate output
 	stat, err := os.Stat(outPath)
 	if err != nil || stat.Size() < 1024 {
 		http.Error(w, "output seems empty or invalid", 500)
 		return
 	}
 
-	// serve file
+	// Serve the finished file
 	ctype := "application/octet-stream"
 	switch strings.ToLower(filepath.Ext(outPath)) {
 	case ".mp4":
@@ -588,10 +504,11 @@ func health(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"ok":        true,
 		"service":   "videocompress",
-		"version":   "2.3.0",
-		"modes":     []string{"ai", "balanced", "fast", "super_fast", "ultra_fast", "quality"},
-		"time_hint": "AI picks the fastest profile that fits target_secs; 200MB–2GB prefers ultra_fast unless ~200–250MB with >=180s budget.",
-		"defaults":  map[string]any{"codec": "h264", "resolution": "original", "hw": "none", "target_secs": 120},
+		"version":   "2.1.0",
+		"ffmpeg":    "required",
+		"defaults":  map[string]any{"codec": "h264", "speed": "balanced", "resolution": "original"},
+		"hardware":  []string{"none (CPU)", "videotoolbox (macOS)"},
+		"endpoints": []string{"/", "/compress", "/health"},
 	})
 }
 
@@ -610,6 +527,7 @@ func main() {
 	}
 
 	log.Printf("VideoCompress server listening on http://localhost:%s ...", addr)
+
 	if err := s.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
