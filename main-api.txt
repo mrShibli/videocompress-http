@@ -27,6 +27,7 @@ import (
 
 const (
 	maxUploadSize = 2 << 30 // 2 GB
+	tmpKeep       = 30 * time.Minute
 )
 
 // ======================
@@ -71,17 +72,18 @@ func humanBytes(n int64) string {
 // ======================
 
 type compressOpts struct {
-	Codec      string // h264|h265|copy
-	CRF        int    // CPU encoders quality
-	Preset     string // ultrafast..placebo (CPU encoders)
-	Scale      string // e.g. 1280:-2 or 1920:1080
-	FPS        int    // force output fps if >0
-	Audio      string // aac|opus|copy
-	AB         string // audio bitrate (e.g. 128k)
-	HW         string // videotoolbox|none
-	OutExt     string // .mp4 (recommended)
-	SpeedMode  string // ultra_fast|super_fast|fast|balanced|quality|ai|max|turbo
-	Resolution string // 360p|480p|720p|1080p|1440p|2160p|original
+	Codec      string        // h264|h265|copy
+	CRF        int           // CPU encoders quality
+	Preset     string        // ultrafast..placebo (CPU encoders)
+	Scale      string        // e.g. 1280:-2 or 1920:1080
+	Audio      string        // aac|opus|copy
+	AB         string        // audio bitrate
+	HW         string        // videotoolbox|none
+	OutExt     string        // .mp4 (recommended)
+	Timeout    time.Duration // overall job timeout
+	SpeedMode  string        // ultra_fast|super_fast|fast|balanced|quality|ai
+	Resolution string        // 360p|480p|720p|1080p|1440p|2160p|original
+	TargetSecs int           // AI time budget in seconds (default 120)
 }
 
 func (o *compressOpts) normalize() {
@@ -100,13 +102,48 @@ func (o *compressOpts) normalize() {
 	if o.OutExt == "" {
 		o.OutExt = ".mp4"
 	}
+	if o.Timeout == 0 {
+		o.Timeout = 45 * time.Minute
+	}
 	if o.SpeedMode == "" {
 		o.SpeedMode = "ai"
 	}
 	if o.Resolution == "" {
 		o.Resolution = "original"
 	}
+	if o.TargetSecs <= 0 {
+		o.TargetSecs = 120 // 2 minutes
+	}
+	// NOTE: applySpeedMode called after AI finalizes SpeedMode.
 	o.applyResolution()
+}
+
+func throughputMBps(speed string) float64 {
+	switch speed {
+	case "ultra_fast":
+		return 8.0
+	case "super_fast":
+		return 5.0
+	case "fast":
+		return 3.0
+	case "balanced":
+		return 2.0
+	case "quality":
+		return 1.2
+	default:
+		return 2.0
+	}
+}
+
+// Estimate time by size & profile (seconds)
+func estimateTimeSecs(sizeMB int64, speed string) int {
+	t := throughputMBps(speed)
+	if t <= 0 {
+		t = 2.0
+	}
+	secs := float64(sizeMB) / t
+	secs *= 1.15 // overhead
+	return int(secs)
 }
 
 func chooseSpeedBySize(sizeMB int64) string {
@@ -127,15 +164,6 @@ func chooseSpeedBySize(sizeMB int64) string {
 // Apply speed profile → CRF/Preset/AB
 func (o *compressOpts) applySpeedMode() {
 	switch o.SpeedMode {
-	case "turbo":
-		// Soft-fast turbo: default to 720p (in build), AAC stereo
-		o.CRF = 34
-		o.Preset = "ultrafast"
-		o.AB = "96k"
-	case "max":
-		o.CRF = 36
-		o.Preset = "ultrafast"
-		o.AB = "64k"
 	case "ultra_fast":
 		o.CRF = 32
 		o.Preset = "ultrafast"
@@ -198,39 +226,11 @@ func (o *compressOpts) tinyInputSafety(fileSize int64) {
 
 // ffmpeg args
 func buildFFmpegArgs(inPath, outPath string, o compressOpts) []string {
-	// Base flags; try HW decode on mac when enabled
-	args := []string{"-y", "-hide_banner", "-loglevel", "error"}
-	if strings.ToLower(o.HW) == "videotoolbox" {
-		args = append(args, "-hwaccel", "videotoolbox", "-hwaccel_output_format", "videotoolbox")
-	}
-	args = append(args, "-i", inPath)
-
-	// Turbo defaults: 720p @ 24fps if user didn't set them
-	if o.SpeedMode == "turbo" {
-		if o.Scale == "" && strings.ToLower(o.Codec) != "copy" {
-			o.Scale = "1280:720"
-		}
-		if o.FPS == 0 {
-			o.FPS = 24
-		}
-	}
-	// Max defaults: 480p @ 24fps if user didn't set them
-	if o.SpeedMode == "max" {
-		if o.Scale == "" && strings.ToLower(o.Codec) != "copy" {
-			o.Scale = "854:480"
-		}
-		if o.FPS == 0 {
-			o.FPS = 24
-		}
-	}
+	args := []string{"-y", "-hide_banner", "-loglevel", "error", "-i", inPath}
 
 	// scale
 	if o.Scale != "" && strings.ToLower(o.Codec) != "copy" {
 		args = append(args, "-vf", "scale="+o.Scale+":flags=fast_bilinear")
-	}
-	// fps (only if re-encoding video)
-	if o.FPS > 0 && strings.ToLower(o.Codec) != "copy" {
-		args = append(args, "-r", strconv.Itoa(o.FPS))
 	}
 
 	// codec
@@ -272,14 +272,8 @@ func buildFFmpegArgs(inPath, outPath string, o compressOpts) []string {
 				bitrate = "3M"
 			case o.CRF <= 30:
 				bitrate = "2.5M"
-			case o.CRF <= 36:
-				bitrate = "2M"
 			default:
-				bitrate = "1500k"
-			}
-			// Turbo a bit higher for decent 720p
-			if o.SpeedMode == "turbo" {
-				bitrate = "2500k"
+				bitrate = "2M"
 			}
 			args = append(args, "-b:v", bitrate)
 		}
@@ -287,23 +281,6 @@ func buildFFmpegArgs(inPath, outPath string, o compressOpts) []string {
 		// browser compatibility
 		if strings.ToLower(o.OutExt) == ".mp4" {
 			args = append(args, "-pix_fmt", "yuv420p")
-		}
-	}
-
-	// Extra accelerations (zero-latency style) for turbo/max
-	if o.SpeedMode == "max" || o.SpeedMode == "turbo" {
-		switch vcodec {
-		case "libx264":
-			args = append(args, "-tune", "fastdecode,zerolatency")
-			args = append(args, "-g", "300", "-keyint_min", "300")
-			args = append(args, "-x264-params",
-				"no-scenecut=1:ref=1:bframes=0:me=dia:subme=0:trellis=0:aq-mode=0:fast_pskip=1:sync-lookahead=0:rc-lookahead=0")
-		case "libx265":
-			args = append(args, "-tune", "fastdecode")
-			args = append(args, "-g", "300", "-keyint_min", "300")
-		case "h264_videotoolbox", "hevc_videotoolbox":
-			args = append(args, "-realtime", "true")
-			args = append(args, "-g", "300")
 		}
 	}
 
@@ -315,14 +292,6 @@ func buildFFmpegArgs(inPath, outPath string, o compressOpts) []string {
 		args = append(args, "-c:a", "libopus", "-b:a", o.AB)
 	default:
 		args = append(args, "-c:a", "aac", "-b:a", o.AB)
-		// turbo: stereo 96k; max: mono 64k
-		if o.SpeedMode == "turbo" {
-			args = append(args, "-ac", "2")
-			args = append(args, "-b:a", "96k")
-		} else if o.SpeedMode == "max" {
-			args = append(args, "-ac", "1")
-			args = append(args, "-b:a", "64k")
-		}
 	}
 
 	// faststart + threads
@@ -360,23 +329,41 @@ func runFFmpeg(ctx context.Context, inPath, outPath string, o compressOpts, logW
 // ======================
 
 type resultEntry struct {
-	FilePath    string
-	ModeFinal   string
-	ModeDecider string // "ai" or "manual"
-	InputBytes  int64
-	OutputBytes int64
-	Resolution  string
-	Codec       string
-	Audio       string
-	HW          string
-	ElapsedMs   int64
-	Throughput  float64 // MB/s
+	FilePath      string
+	CreatedAt     time.Time
+	ModeFinal     string
+	ModeDecider   string // "ai" or "manual"
+	InputBytes    int64
+	OutputBytes   int64
+	DurationMS    int64
+	Resolution    string
+	Codec         string
+	Audio         string
+	HW            string
+	ThroughputMBs float64
 }
 
 var (
 	storeMu sync.Mutex
 	store   = map[string]*resultEntry{}
 )
+
+// cleanup goroutine (optional; call once in main if you want)
+func cleanupStore() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		now := time.Now()
+		storeMu.Lock()
+		for id, e := range store {
+			if now.Sub(e.CreatedAt) > tmpKeep {
+				_ = os.Remove(e.FilePath)
+				delete(store, id)
+			}
+		}
+		storeMu.Unlock()
+	}
+}
 
 // ======================
 //
@@ -399,6 +386,7 @@ details{margin:12px 0}
 pre{background:#f3f4f6;padding:12px;border-radius:6px;overflow:auto}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px}
 .card{border:1px solid #e5e7eb;border-radius:8px;padding:8px}
+.card input{width:auto}
 small{color:#6b7280}
 .kv{display:grid;grid-template-columns:200px 1fr;gap:8px 16px}
 kbd{background:#f3f4f6;border:1px solid #e5e7eb;border-radius:4px;padding:2px 6px}
@@ -417,16 +405,19 @@ kbd{background:#f3f4f6;border:1px solid #e5e7eb;border-radius:4px;padding:2px 6p
     <div class="card">
       <label>Mode</label>
       <select name="speed">
-        <option value="ai" selected>AI (auto by size)</option>
-        <option value="turbo">TURBO (very fast, 720p)</option>
-        <option value="max">MAX (very fast, 480p)</option>
-        <option value="ultra_fast">Ultra Fast</option>
-        <option value="super_fast">Super Fast</option>
-        <option value="fast">Fast</option>
+        <option value="ai" selected>AI (auto by size & time)</option>
         <option value="balanced">Balanced</option>
+        <option value="fast">Fast</option>
+        <option value="super_fast">Super Fast</option>
+        <option value="ultra_fast">Ultra Fast</option>
         <option value="quality">Quality</option>
       </select>
-      <small>No time budget. AI picks by file size only.</small>
+      <small>AI picks speed by file size + your time budget.</small>
+    </div>
+    <div class="card">
+      <label>Time budget (seconds)</label>
+      <input style="width: 245px;" type="number" name="target_secs" value="120" min="30" step="10">
+      <small>Example: 120 = 2 minutes</small>
     </div>
     <div class="card">
       <label>Resolution</label>
@@ -481,16 +472,17 @@ kbd{background:#f3f4f6;border:1px solid #e5e7eb;border-radius:4px;padding:2px 6p
   <button type="submit">Compress</button>
 </form>
 
-<h3>cURL (API, returns file bytes + timing headers)</h3>
+<h3>cURL example (API, returns file + metadata headers)</h3>
 <pre>
 curl -f -S -o out.mp4 \
   -H "Accept: application/octet-stream" \
   -F "file=@input.mp4" \
   -F "speed=ai" \
-  http://localhost:8080/compress -D headers.txt
-
-# headers include: X-Encode-Duration-Ms and X-Throughput-MBps
+  -F "target_secs=120" \
+  http://localhost:8080/compress \
+  -D headers.txt
 </pre>
+<p><small>Check <kbd>headers.txt</kbd> for <kbd>X-*</kbd> metadata like time taken, mode, sizes, throughput.</small></p>
 `))
 
 var resultTpl = template.Must(template.New("r").Parse(`
@@ -522,17 +514,18 @@ pre{background:#f3f4f6;padding:12px;border-radius:6px;overflow:auto}
 
 <a class="btn" href="/dl/{{.ID}}?name={{.SuggestName}}">⬇️ Download compressed file</a>
 
-<h3>API example</h3>
+<h3>Use from API</h3>
 <pre>
 curl -f -S -o out.mp4 \
   -H "Accept: application/octet-stream" \
   -F "file=@input.mp4" \
   -F "speed={{.ModeDecider}}" \
+  -F "target_secs=120" \
   http://localhost:8080/compress \
   -D headers.txt
 
-# Timing headers:
-# X-Encode-Duration-Ms, X-Throughput-MBps
+# Then parse headers.txt for:
+# X-Mode, X-Mode-Decider, X-Encode-Duration-Ms, X-Input-Bytes, X-Output-Bytes, X-Throughput-MBps
 </pre>
 `))
 
@@ -546,7 +539,7 @@ func savePartToTemp(part *multipart.Part, suggested string) (string, error) {
 	tmpDir := os.TempDir()
 	name := filepath.Base(suggested)
 	if name == "" || name == "." || name == "/" {
-		name = "upload_" + randID(6)
+		name = fmt.Sprintf("upload_%d", time.Now().UnixNano())
 	}
 	dst := filepath.Join(tmpDir, name)
 	f, err := os.Create(dst)
@@ -574,9 +567,9 @@ func parseOpts(r *http.Request) (compressOpts, error) {
 	o.OutExt = get("outExt", ".mp4")
 	o.SpeedMode = get("speed", "ai")
 	o.Resolution = get("resolution", "original")
-	if fpsStr := get("fps", ""); fpsStr != "" {
-		if n, err := strconv.Atoi(fpsStr); err == nil && n > 0 && n <= 60 {
-			o.FPS = n
+	if ts := get("target_secs", "120"); ts != "" {
+		if n, err := strconv.Atoi(ts); err == nil && n > 0 {
+			o.TargetSecs = n
 		}
 	}
 	o.normalize()
@@ -628,7 +621,7 @@ func compressHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// File size
+	// File info
 	st, _ := os.Stat(inPath)
 	var sizeMB int64
 	var inputBytes int64
@@ -637,19 +630,33 @@ func compressHandler(w http.ResponseWriter, r *http.Request) {
 		sizeMB = st.Size() / (1024 * 1024)
 	}
 
-	// Decide final mode if AI (size-only)
+	// Decide final mode if AI
 	modeDecider := "manual"
 	if opts.SpeedMode == "ai" {
 		modeDecider = "ai"
 		base := chooseSpeedBySize(sizeMB)
+
+		// Your earlier special rule carried forward:
 		if sizeMB >= 200 && sizeMB < 2048 {
-			if sizeMB <= 250 {
+			if sizeMB <= 250 && opts.TargetSecs >= 180 {
 				base = "balanced"
 			} else {
 				base = "ultra_fast"
 			}
 		}
-		opts.SpeedMode = base
+
+		candidates := []string{"ultra_fast", "super_fast", "fast", "balanced", "quality"}
+		chosen := ""
+		for _, c := range candidates {
+			if estimateTimeSecs(sizeMB, c) <= opts.TargetSecs {
+				chosen = c
+				break
+			}
+		}
+		if chosen == "" {
+			chosen = base
+		}
+		opts.SpeedMode = chosen
 	}
 
 	// Small-file safety
@@ -660,18 +667,16 @@ func compressHandler(w http.ResponseWriter, r *http.Request) {
 
 	outPath := withExt(inPath, "_compressed"+opts.OutExt)
 
-	// --- timing starts here ---
-	start := time.Now()
+	// Run ffmpeg synchronously, measure time
+	ctx, cancel := context.WithTimeout(r.Context(), opts.Timeout)
+	defer cancel()
 
-	// Run ffmpeg synchronously (no timeouts)
-	ctx := r.Context()
+	start := time.Now()
 	if err := runFFmpeg(ctx, inPath, outPath, opts, io.Discard); err != nil {
 		http.Error(w, "compression failed: "+err.Error(), 500)
 		return
 	}
-
 	elapsed := time.Since(start)
-	elapsedMs := elapsed.Milliseconds()
 
 	// validate output
 	stat, err := os.Stat(outPath)
@@ -681,23 +686,22 @@ func compressHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	outputBytes := stat.Size()
 
-	// throughput (MB/s) = input size / seconds
 	throughput := 0.0
 	sec := elapsed.Seconds()
 	if sec > 0 {
 		throughput = (float64(inputBytes) / (1024 * 1024)) / sec
 	}
 
-	// If API call (Accept: application/octet-stream), return FILE BYTES + metadata headers (includes time)
+	// If API call (Accept: application/octet-stream), return FILE BYTES + metadata headers
 	accept := r.Header.Get("Accept")
 	if strings.Contains(accept, "application/octet-stream") || r.FormValue("api") == "1" {
 		// add metadata headers
 		w.Header().Set("X-Mode", opts.SpeedMode)
 		w.Header().Set("X-Mode-Decider", modeDecider)
-		w.Header().Set("X-Encode-Duration-Ms", fmt.Sprintf("%d", elapsedMs))
-		w.Header().Set("X-Throughput-MBps", fmt.Sprintf("%.4f", throughput))
+		w.Header().Set("X-Encode-Duration-Ms", fmt.Sprintf("%d", elapsed.Milliseconds()))
 		w.Header().Set("X-Input-Bytes", fmt.Sprintf("%d", inputBytes))
 		w.Header().Set("X-Output-Bytes", fmt.Sprintf("%d", outputBytes))
+		w.Header().Set("X-Throughput-MBps", fmt.Sprintf("%.4f", throughput))
 		w.Header().Set("X-Resolution", opts.Resolution)
 		w.Header().Set("X-Video-Codec", opts.Codec)
 		w.Header().Set("X-Audio-Codec", opts.Audio)
@@ -713,23 +717,25 @@ func compressHandler(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", ctype)
 		w.Header().Set("Content-Disposition", "attachment; filename=\""+filepath.Base(outPath)+"\"")
 		http.ServeFile(w, r, outPath)
+		// Optionally remove after send? Keeping it allows repeat downloads if client retries.
 		return
 	}
 
-	// UI flow: keep file in temp store and show a result page (includes time/throughput)
+	// Otherwise, UI flow: keep file in temp store and show a result page
 	id := randID(12)
 	entry := &resultEntry{
-		FilePath:    outPath,
-		ModeFinal:   opts.SpeedMode,
-		ModeDecider: modeDecider,
-		InputBytes:  inputBytes,
-		OutputBytes: outputBytes,
-		Resolution:  opts.Resolution,
-		Codec:       opts.Codec,
-		Audio:       opts.Audio,
-		HW:          opts.HW,
-		ElapsedMs:   elapsedMs,
-		Throughput:  throughput,
+		FilePath:      outPath,
+		CreatedAt:     time.Now(),
+		ModeFinal:     opts.SpeedMode,
+		ModeDecider:   modeDecider,
+		InputBytes:    inputBytes,
+		OutputBytes:   outputBytes,
+		DurationMS:    elapsed.Milliseconds(),
+		Resolution:    opts.Resolution,
+		Codec:         opts.Codec,
+		Audio:         opts.Audio,
+		HW:            opts.HW,
+		ThroughputMBs: throughput,
 	}
 	storeMu.Lock()
 	store[id] = entry
@@ -741,6 +747,8 @@ func compressHandler(w http.ResponseWriter, r *http.Request) {
 		"ID":          id,
 		"ModeFinal":   entry.ModeFinal,
 		"ModeDecider": entry.ModeDecider,
+		"Seconds":     float64(entry.DurationMS) / 1000.0,
+		"Throughput":  entry.ThroughputMBs,
 		"InputBytes":  entry.InputBytes,
 		"OutputBytes": entry.OutputBytes,
 		"InputHuman":  humanBytes(entry.InputBytes),
@@ -750,8 +758,6 @@ func compressHandler(w http.ResponseWriter, r *http.Request) {
 		"Audio":       entry.Audio,
 		"HW":          entry.HW,
 		"SuggestName": filepath.Base(outPath),
-		"Seconds":     float64(entry.ElapsedMs) / 1000.0,
-		"Throughput":  entry.Throughput,
 	}
 	_ = resultTpl.Execute(w, data)
 }
@@ -779,6 +785,8 @@ func dlHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", ctype)
 	w.Header().Set("Content-Disposition", "attachment; filename=\""+name+"\"")
 	http.ServeFile(w, r, e.FilePath)
+	// Optionally delete after first download:
+	// os.Remove(e.FilePath); storeMu.Lock(); delete(store, id); storeMu.Unlock()
 }
 
 func metaHandler(w http.ResponseWriter, r *http.Request) {
@@ -792,17 +800,18 @@ func metaHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"id":                 id,
-		"mode":               e.ModeFinal,
-		"mode_decider":       e.ModeDecider,
-		"input_bytes":        e.InputBytes,
-		"output_bytes":       e.OutputBytes,
-		"resolution":         e.Resolution,
-		"codec":              e.Codec,
-		"audio":              e.Audio,
-		"hw":                 e.HW,
-		"encode_duration_ms": e.ElapsedMs,
-		"throughput_mb_s":    e.Throughput,
+		"id":             id,
+		"mode":           e.ModeFinal,
+		"mode_decider":   e.ModeDecider,
+		"duration_ms":    e.DurationMS,
+		"input_bytes":    e.InputBytes,
+		"output_bytes":   e.OutputBytes,
+		"throughput_mb_s": e.ThroughputMBs,
+		"resolution":     e.Resolution,
+		"codec":          e.Codec,
+		"audio":          e.Audio,
+		"hw":             e.HW,
+		"created_at":     e.CreatedAt.Format(time.RFC3339),
 	})
 }
 
@@ -811,26 +820,29 @@ func health(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"ok":        true,
 		"service":   "videocompress",
-		"version":   "3.1.0-timed",
-		"modes":     []string{"ai", "turbo", "max", "ultra_fast", "super_fast", "fast", "balanced", "quality"},
-		"defaults":  map[string]any{"codec": "h264", "resolution": "original", "hw": "none"},
+		"version":   "2.4.0",
+		"modes":     []string{"ai", "balanced", "fast", "super_fast", "ultra_fast", "quality"},
+		"defaults":  map[string]any{"codec": "h264", "resolution": "original", "hw": "none", "target_secs": 120},
 		"ui_routes": []string{"/", "/compress (POST)", "/dl/{id}", "/meta/{id}"},
 	})
 }
 
 func main() {
+	go cleanupStore()
+
 	addr := envOr("PORT", "8080")
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", uploadPage)
 	mux.HandleFunc("/compress", compressHandler)
-	mux.HandleFunc("/dl/", dlHandler)     // GET /dl/{id}?name=...
+	mux.HandleFunc("/dl/", dlHandler)    // GET /dl/{id}?name=...
 	mux.HandleFunc("/meta/", metaHandler) // GET /meta/{id}
 	mux.HandleFunc("/health", health)
 
 	s := &http.Server{
-		Addr:    ":" + addr,
-		Handler: logMiddleware(mux),
+		Addr:              ":" + addr,
+		Handler:           logMiddleware(mux),
+		ReadHeaderTimeout: 20 * time.Second,
 	}
 
 	log.Printf("VideoCompress server listening on http://localhost:%s ...", addr)
@@ -839,10 +851,11 @@ func main() {
 	}
 }
 
-// basic request logger (no timing spans)
+// basic request logger
 func logMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
 		next.ServeHTTP(w, r)
-		log.Printf("%s %s", r.Method, r.URL.Path)
+		log.Printf("%s %s %s", r.Method, r.URL.Path, time.Since(start))
 	})
 }
