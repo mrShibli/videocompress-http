@@ -50,6 +50,14 @@ The server will start on `http://localhost:8080` (or the port specified in the `
 3. Choose compression settings or use AI mode
 4. Download the compressed video
 
+### API Documentation
+
+Visit `http://localhost:8080/api-docs` for complete interactive API documentation including:
+- PHP and Laravel integration examples
+- Node.js and Python examples
+- Interactive code copying
+- Endpoint testing
+
 ### API Usage
 
 #### Basic Compression

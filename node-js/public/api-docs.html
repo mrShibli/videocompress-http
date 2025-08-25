@@ -428,6 +428,8 @@
             <div class="endpoint">
                 <div class="tabs">
                     <div class="tab active" onclick="switchTab('curl')">cURL</div>
+                    <div class="tab" onclick="switchTab('php')">PHP</div>
+                    <div class="tab" onclick="switchTab('laravel')">Laravel</div>
                     <div class="tab" onclick="switchTab('nodejs')">Node.js</div>
                     <div class="tab" onclick="switchTab('python')">Python</div>
                 </div>
@@ -441,6 +443,95 @@
                         -F "speed=ai" \
                         -o compressed.mp4 \
                         http://localhost:8080/compress
+                    </div>
+                    <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+                </div>
+
+                <div class="tab-content" id="php">
+                    <div class="example-header">PHP Example:</div>
+                    <div class="code-block">
+                        &lt;?php
+                        $url = 'http://localhost:8080/compress';
+                        $file_path = 'video.mp4';
+
+                        $post_data = [
+                        'file' => new CURLFile($file_path),
+                        'speed' => 'ai'
+                        ];
+
+                        $ch = curl_init();
+                        curl_setopt($ch, CURLOPT_URL, $url);
+                        curl_setopt($ch, CURLOPT_POST, true);
+                        curl_setopt($ch, CURLOPT_POSTFIELDS, $post_data);
+                        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                        'Accept: application/octet-stream'
+                        ]);
+
+                        $response = curl_exec($ch);
+                        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                        curl_close($ch);
+
+                        if ($http_code === 200) {
+                        file_put_contents('compressed.mp4', $response);
+                        echo "Video compressed successfully!";
+                        } else {
+                        echo "Error: HTTP $http_code";
+                        }
+                        ?&gt;
+                    </div>
+                    <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+                </div>
+
+                <div class="tab-content" id="laravel">
+                    <div class="example-header">Laravel Example:</div>
+                    <div class="code-block">
+                        &lt;?php
+                        namespace App\Http\Controllers;
+
+                        use Illuminate\Http\Request;
+                        use Illuminate\Support\Facades\Http;
+                        use Illuminate\Support\Facades\Storage;
+
+                        class VideoController extends Controller
+                        {
+                        public function compress(Request $request)
+                        {
+                        $request->validate([
+                        'video' => 'required|file|mimes:mp4,mov,avi,mkv|max:2048'
+                        ]);
+
+                        $file = $request->file('video');
+                        $speed = $request->input('speed', 'ai');
+
+                        $response = Http::attach(
+                        'file',
+                        file_get_contents($file->getPathname()),
+                        $file->getClientOriginalName()
+                        )->post('http://localhost:8080/compress', [
+                        'speed' => $speed
+                        ])->withHeaders([
+                        'Accept' => 'application/octet-stream'
+                        ]);
+
+                        if ($response->successful()) {
+                        $compressed_path = 'compressed/' . time() . '_compressed.mp4';
+                        Storage::put($compressed_path, $response->body());
+
+                        return response()->json([
+                        'success' => true,
+                        'file' => $compressed_path,
+                        'headers' => $response->headers()
+                        ]);
+                        }
+
+                        return response()->json([
+                        'success' => false,
+                        'error' => 'Compression failed'
+                        ], 500);
+                        }
+                        }
+                        ?&gt;
                     </div>
                     <button class="copy-btn" onclick="copyCode(this)">Copy</button>
                 </div>
@@ -760,6 +851,550 @@
 
         <div class="section">
             <div class="section-header">
+                <h2>🐘 PHP & Laravel Integration</h2>
+                <p>Complete integration examples for PHP and Laravel applications</p>
+            </div>
+            <div class="endpoint">
+                <div class="tabs">
+                    <div class="tab active" onclick="switchTab('php-basic')">Basic PHP</div>
+                    <div class="tab" onclick="switchTab('php-oop')">PHP OOP</div>
+                    <div class="tab" onclick="switchTab('laravel-controller')">Laravel Controller</div>
+                    <div class="tab" onclick="switchTab('laravel-service')">Laravel Service</div>
+                    <div class="tab" onclick="switchTab('laravel-job')">Laravel Job</div>
+                </div>
+
+                <div class="tab-content active" id="php-basic">
+                    <div class="example-header">Basic PHP with cURL:</div>
+                    <div class="code-block">
+                        &lt;?php
+                        function compressVideo($file_path, $speed = 'ai', $api_url = 'http://localhost:8080/compress') {
+                        if (!file_exists($file_path)) {
+                        throw new Exception("File not found: $file_path");
+                        }
+
+                        $post_data = [
+                        'file' => new CURLFile($file_path),
+                        'speed' => $speed,
+                        'resolution' => '720p'
+                        ];
+
+                        $ch = curl_init();
+                        curl_setopt_array($ch, [
+                        CURLOPT_URL => $api_url,
+                        CURLOPT_POST => true,
+                        CURLOPT_POSTFIELDS => $post_data,
+                        CURLOPT_RETURNTRANSFER => true,
+                        CURLOPT_HTTPHEADER => ['Accept: application/octet-stream'],
+                        CURLOPT_TIMEOUT => 300 // 5 minutes
+                        ]);
+
+                        $response = curl_exec($ch);
+                        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                        $error = curl_error($ch);
+                        curl_close($ch);
+
+                        if ($error) {
+                        throw new Exception("cURL Error: $error");
+                        }
+
+                        if ($http_code !== 200) {
+                        throw new Exception("HTTP Error: $http_code");
+                        }
+
+                        return $response;
+                        }
+
+                        // Usage
+                        try {
+                        $compressed_video = compressVideo('input.mp4', 'balanced');
+                        file_put_contents('output.mp4', $compressed_video);
+                        echo "Video compressed successfully!";
+                        } catch (Exception $e) {
+                        echo "Error: " . $e->getMessage();
+                        }
+                        ?&gt;
+                    </div>
+                    <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+                </div>
+
+                <div class="tab-content" id="php-oop">
+                    <div class="example-header">PHP OOP Class:</div>
+                    <div class="code-block">
+                        &lt;?php
+                        class VideoCompressor {
+                        private $api_url;
+                        private $timeout;
+
+                        public function __construct($api_url = 'http://localhost:8080/compress', $timeout = 300) {
+                        $this->api_url = $api_url;
+                        $this->timeout = $timeout;
+                        }
+
+                        public function compress($file_path, $options = []) {
+                        $defaults = [
+                        'speed' => 'ai',
+                        'resolution' => 'original',
+                        'codec' => 'h264',
+                        'hw' => 'none'
+                        ];
+
+                        $options = array_merge($defaults, $options);
+
+                        if (!file_exists($file_path)) {
+                        throw new InvalidArgumentException("File not found: $file_path");
+                        }
+
+                        $post_data = [
+                        'file' => new CURLFile($file_path)
+                        ];
+
+                        // Add options to post data
+                        foreach ($options as $key => $value) {
+                        $post_data[$key] = $value;
+                        }
+
+                        $ch = curl_init();
+                        curl_setopt_array($ch, [
+                        CURLOPT_URL => $this->api_url,
+                        CURLOPT_POST => true,
+                        CURLOPT_POSTFIELDS => $post_data,
+                        CURLOPT_RETURNTRANSFER => true,
+                        CURLOPT_HTTPHEADER => ['Accept: application/octet-stream'],
+                        CURLOPT_TIMEOUT => $this->timeout
+                        ]);
+
+                        $response = curl_exec($ch);
+                        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                        $error = curl_error($ch);
+                        curl_close($ch);
+
+                        if ($error) {
+                        throw new RuntimeException("cURL Error: $error");
+                        }
+
+                        if ($http_code !== 200) {
+                        throw new RuntimeException("HTTP Error: $http_code");
+                        }
+
+                        return $response;
+                        }
+
+                        public function compressToFile($input_path, $output_path, $options = []) {
+                        $compressed_data = $this->compress($input_path, $options);
+                        return file_put_contents($output_path, $compressed_data);
+                        }
+                        }
+
+                        // Usage
+                        $compressor = new VideoCompressor();
+                        try {
+                        $compressor->compressToFile('input.mp4', 'output.mp4', [
+                        'speed' => 'balanced',
+                        'resolution' => '720p'
+                        ]);
+                        echo "Video compressed successfully!";
+                        } catch (Exception $e) {
+                        echo "Error: " . $e->getMessage();
+                        }
+                        ?&gt;
+                    </div>
+                    <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+                </div>
+
+                <div class="tab-content" id="laravel-controller">
+                    <div class="example-header">Laravel Controller:</div>
+                    <div class="code-block">
+                        &lt;?php
+                        namespace App\Http\Controllers;
+
+                        use Illuminate\Http\Request;
+                        use Illuminate\Support\Facades\Http;
+                        use Illuminate\Support\Facades\Storage;
+                        use Illuminate\Support\Facades\Log;
+
+                        class VideoController extends Controller
+                        {
+                        private $api_url = 'http://localhost:8080/compress';
+
+                        public function compress(Request $request)
+                        {
+                        $request->validate([
+                        'video' => 'required|file|mimes:mp4,mov,avi,mkv,webm|max:2048',
+                        'speed' => 'string|in:ai,turbo,max,ultra_fast,super_fast,fast,balanced,quality',
+                        'resolution' => 'string|in:original,360p,480p,720p,1080p,1440p,2160p',
+                        'codec' => 'string|in:h264,h265,copy',
+                        'hw' => 'string|in:none,videotoolbox'
+                        ]);
+
+                        try {
+                        $file = $request->file('video');
+                        $options = $request->only(['speed', 'resolution', 'codec', 'hw']);
+
+                        // Generate unique filename
+                        $filename = time() . '_' . uniqid() . '_compressed.mp4';
+                        $output_path = 'compressed/' . $filename;
+
+                        $response = Http::timeout(300)->attach(
+                        'file',
+                        file_get_contents($file->getPathname()),
+                        $file->getClientOriginalName()
+                        )->post($this->api_url, $options)->withHeaders([
+                        'Accept' => 'application/octet-stream'
+                        ]);
+
+                        if ($response->successful()) {
+                        Storage::put($output_path, $response->body());
+
+                        return response()->json([
+                        'success' => true,
+                        'file' => $output_path,
+                        'original_size' => $file->getSize(),
+                        'compressed_size' => Storage::size($output_path),
+                        'compression_ratio' => round((1 - Storage::size($output_path) / $file->getSize()) * 100, 2),
+                        'headers' => $response->headers()
+                        ]);
+                        }
+
+                        Log::error('Video compression failed', [
+                        'status' => $response->status(),
+                        'body' => $response->body()
+                        ]);
+
+                        return response()->json([
+                        'success' => false,
+                        'error' => 'Compression failed'
+                        ], 500);
+
+                        } catch (\Exception $e) {
+                        Log::error('Video compression error', [
+                        'error' => $e->getMessage(),
+                        'file' => $file->getClientOriginalName()
+                        ]);
+
+                        return response()->json([
+                        'success' => false,
+                        'error' => 'Internal server error'
+                        ], 500);
+                        }
+                        }
+
+                        public function download($filename)
+                        {
+                        $path = 'compressed/' . $filename;
+
+                        if (!Storage::exists($path)) {
+                        return response()->json(['error' => 'File not found'], 404);
+                        }
+
+                        return Storage::download($path);
+                        }
+                        }
+                        ?&gt;
+                    </div>
+                    <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+                </div>
+
+                <div class="tab-content" id="laravel-service">
+                    <div class="example-header">Laravel Service Class:</div>
+                    <div class="code-block">
+                        &lt;?php
+                        namespace App\Services;
+
+                        use Illuminate\Support\Facades\Http;
+                        use Illuminate\Support\Facades\Storage;
+                        use Illuminate\Support\Facades\Log;
+
+                        class VideoCompressionService
+                        {
+                        private $api_url;
+                        private $timeout;
+
+                        public function __construct($api_url = null, $timeout = 300)
+                        {
+                        $this->api_url = $api_url ?? config('services.videocompress.url',
+                        'http://localhost:8080/compress');
+                        $this->timeout = $timeout;
+                        }
+
+                        public function compress($file_path, $options = [])
+                        {
+                        $defaults = [
+                        'speed' => 'ai',
+                        'resolution' => 'original',
+                        'codec' => 'h264',
+                        'hw' => 'none'
+                        ];
+
+                        $options = array_merge($defaults, $options);
+
+                        if (!file_exists($file_path)) {
+                        throw new \InvalidArgumentException("File not found: $file_path");
+                        }
+
+                        try {
+                        $response = Http::timeout($this->timeout)->attach(
+                        'file',
+                        file_get_contents($file_path),
+                        basename($file_path)
+                        )->post($this->api_url, $options)->withHeaders([
+                        'Accept' => 'application/octet-stream'
+                        ]);
+
+                        if (!$response->successful()) {
+                        throw new \RuntimeException("Compression failed: HTTP " . $response->status());
+                        }
+
+                        return [
+                        'data' => $response->body(),
+                        'headers' => $response->headers(),
+                        'size' => strlen($response->body())
+                        ];
+
+                        } catch (\Exception $e) {
+                        Log::error('Video compression service error', [
+                        'file' => $file_path,
+                        'options' => $options,
+                        'error' => $e->getMessage()
+                        ]);
+                        throw $e;
+                        }
+                        }
+
+                        public function compressAndSave($input_path, $output_path, $options = [])
+                        {
+                        $result = $this->compress($input_path, $options);
+
+                        $directory = dirname($output_path);
+                        if (!is_dir($directory)) {
+                        mkdir($directory, 0755, true);
+                        }
+
+                        file_put_contents($output_path, $result['data']);
+
+                        return [
+                        'output_path' => $output_path,
+                        'size' => $result['size'],
+                        'headers' => $result['headers']
+                        ];
+                        }
+
+                        public function compressToStorage($input_path, $storage_path, $options = [])
+                        {
+                        $result = $this->compress($input_path, $options);
+                        Storage::put($storage_path, $result['data']);
+
+                        return [
+                        'storage_path' => $storage_path,
+                        'size' => $result['size'],
+                        'headers' => $result['headers']
+                        ];
+                        }
+                        }
+
+                        // Usage in Controller
+                        class VideoController extends Controller
+                        {
+                        private $compressionService;
+
+                        public function __construct(VideoCompressionService $compressionService)
+                        {
+                        $this->compressionService = $compressionService;
+                        }
+
+                        public function compress(Request $request)
+                        {
+                        $file = $request->file('video');
+                        $options = $request->only(['speed', 'resolution', 'codec', 'hw']);
+
+                        $output_path = 'compressed/' . time() . '_compressed.mp4';
+
+                        try {
+                        $result = $this->compressionService->compressToStorage(
+                        $file->getPathname(),
+                        $output_path,
+                        $options
+                        );
+
+                        return response()->json([
+                        'success' => true,
+                        'file' => $output_path,
+                        'size' => $result['size']
+                        ]);
+
+                        } catch (\Exception $e) {
+                        return response()->json([
+                        'success' => false,
+                        'error' => $e->getMessage()
+                        ], 500);
+                        }
+                        }
+                        }
+                        ?&gt;
+                    </div>
+                    <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+                </div>
+
+                <div class="tab-content" id="laravel-job">
+                    <div class="example-header">Laravel Queue Job:</div>
+                    <div class="code-block">
+                        &lt;?php
+                        namespace App\Jobs;
+
+                        use Illuminate\Bus\Queueable;
+                        use Illuminate\Contracts\Queue\ShouldQueue;
+                        use Illuminate\Foundation\Bus\Dispatchable;
+                        use Illuminate\Queue\InteractsWithQueue;
+                        use Illuminate\Queue\SerializesModels;
+                        use App\Services\VideoCompressionService;
+                        use Illuminate\Support\Facades\Storage;
+                        use Illuminate\Support\Facades\Log;
+
+                        class CompressVideoJob implements ShouldQueue
+                        {
+                        use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+                        public $timeout = 600; // 10 minutes
+                        public $tries = 3;
+
+                        private $input_path;
+                        private $output_path;
+                        private $options;
+                        private $user_id;
+
+                        public function __construct($input_path, $output_path, $options = [], $user_id = null)
+                        {
+                        $this->input_path = $input_path;
+                        $this->output_path = $output_path;
+                        $this->options = $options;
+                        $this->user_id = $user_id;
+                        }
+
+                        public function handle(VideoCompressionService $compressionService)
+                        {
+                        try {
+                        Log::info('Starting video compression job', [
+                        'input' => $this->input_path,
+                        'output' => $this->output_path,
+                        'user_id' => $this->user_id
+                        ]);
+
+                        $result = $compressionService->compressToStorage(
+                        $this->input_path,
+                        $this->output_path,
+                        $this->options
+                        );
+
+                        // Update database or send notification
+                        $this->updateCompressionStatus('completed', $result);
+
+                        Log::info('Video compression completed', [
+                        'output' => $this->output_path,
+                        'size' => $result['size']
+                        ]);
+
+                        } catch (\Exception $e) {
+                        Log::error('Video compression job failed', [
+                        'input' => $this->input_path,
+                        'error' => $e->getMessage()
+                        ]);
+
+                        $this->updateCompressionStatus('failed', ['error' => $e->getMessage()]);
+
+                        throw $e;
+                        }
+                        }
+
+                        private function updateCompressionStatus($status, $data = [])
+                        {
+                        // Update your database or send notification
+                        // Example: Update a video_compressions table
+                        \DB::table('video_compressions')->where('input_path', $this->input_path)->update([
+                        'status' => $status,
+                        'output_path' => $status === 'completed' ? $this->output_path : null,
+                        'completed_at' => now(),
+                        'result_data' => json_encode($data)
+                        ]);
+
+                        // Send notification to user
+                        if ($this->user_id) {
+                        // Send email or push notification
+                        }
+                        }
+
+                        public function failed(\Throwable $exception)
+                        {
+                        Log::error('Video compression job failed permanently', [
+                        'input' => $this->input_path,
+                        'error' => $exception->getMessage()
+                        ]);
+
+                        $this->updateCompressionStatus('failed', ['error' => $exception->getMessage()]);
+                        }
+                        }
+
+                        // Usage in Controller
+                        class VideoController extends Controller
+                        {
+                        public function compress(Request $request)
+                        {
+                        $request->validate([
+                        'video' => 'required|file|mimes:mp4,mov,avi,mkv|max:2048'
+                        ]);
+
+                        $file = $request->file('video');
+                        $options = $request->only(['speed', 'resolution', 'codec', 'hw']);
+
+                        // Save uploaded file
+                        $input_path = $file->store('uploads');
+                        $output_path = 'compressed/' . time() . '_compressed.mp4';
+
+                        // Create database record
+                        $compression_id = \DB::table('video_compressions')->insertGetId([
+                        'user_id' => auth()->id(),
+                        'input_path' => $input_path,
+                        'output_path' => $output_path,
+                        'options' => json_encode($options),
+                        'status' => 'pending',
+                        'created_at' => now()
+                        ]);
+
+                        // Dispatch job
+                        CompressVideoJob::dispatch($input_path, $output_path, $options, auth()->id());
+
+                        return response()->json([
+                        'success' => true,
+                        'message' => 'Video compression started',
+                        'compression_id' => $compression_id
+                        ]);
+                        }
+
+                        public function status($compression_id)
+                        {
+                        $compression = \DB::table('video_compressions')
+                        ->where('id', $compression_id)
+                        ->where('user_id', auth()->id())
+                        ->first();
+
+                        if (!$compression) {
+                        return response()->json(['error' => 'Not found'], 404);
+                        }
+
+                        return response()->json([
+                        'status' => $compression->status,
+                        'output_path' => $compression->output_path,
+                        'result_data' => json_decode($compression->result_data)
+                        ]);
+                        }
+                        }
+                        ?&gt;
+                    </div>
+                    <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-header">
                 <h2>🔧 Configuration Options</h2>
                 <p>Available parameters and their values</p>
             </div>
@@ -933,7 +1568,7 @@
                 let html = block.innerHTML;
 
                 // Highlight keywords
-                html = html.replace(/\b(curl|POST|GET|Accept|application\/octet-stream|file|speed|ai|balanced|resolution|codec|hw|videotoolbox)\b/g, '<span class="keyword">$1</span>');
+                html = html.replace(/\b(curl|POST|GET|Accept|application\/octet-stream|file|speed|ai|balanced|resolution|codec|hw|videotoolbox|php|namespace|use|class|public|private|protected|function|return|try|catch|throw|new|extends|implements|interface|trait|const|static|abstract|final|var|global|isset|unset|empty|include|require|include_once|require_once|__construct|__destruct|__get|__set|__call|__toString|__clone|__sleep|__wakeup|__isset|__unset|__autoload|__invoke|__callStatic|__set_state|__debugInfo|__serialize|__unserialize|yield|yield from|break|continue|switch|case|default|if|else|elseif|for|foreach|while|do|endfor|endforeach|endwhile|endif|endswitch|enddeclare|declare|as|print|echo|die|exit|list|array|object|string|int|float|bool|true|false|null|self|parent|this|instanceof|clone|unset|isset|empty|array_key_exists|array_keys|array_values|array_merge|array_push|array_pop|array_shift|array_unshift|array_slice|array_splice|array_reverse|array_flip|array_unique|array_filter|array_map|array_reduce|array_walk|array_walk_recursive|array_count_values|array_diff|array_intersect|array_union|array_merge_recursive|array_replace|array_replace_recursive|array_multisort|array_pad|array_fill|array_fill_keys|array_rand|array_search|array_sum|array_product|array_chunk|array_column|array_combine|array_count_values|array_diff_assoc|array_diff_key|array_diff_uassoc|array_diff_ukey|array_intersect_assoc|array_intersect_key|array_intersect_uassoc|array_intersect_ukey|array_key_exists|array_keys|array_merge|array_merge_recursive|array_multisort|array_pad|array_pop|array_product|array_push|array_rand|array_reduce|array_replace|array_replace_recursive|array_reverse|array_search|array_shift|array_slice|array_splice|array_sum|array_udiff|array_udiff_assoc|array_udiff_uassoc|array_uintersect|array_uintersect_assoc|array_uintersect_uassoc|array_unique|array_unshift|array_values|array_walk|array_walk_recursive|arsort|asort|compact|count|current|each|end|extract|in_array|key|krsort|ksort|list|natcasesort|natsort|next|pos|prev|range|reset|rsort|shuffle|sizeof|sort|uasort|uksort|usort)\b/g, '<span class="keyword">$1</span>');
 
                 // Highlight strings
                 html = html.replace(/"([^"]*)"/g, '<span class="string">"$1"</span>');
