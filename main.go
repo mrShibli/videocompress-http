@@ -74,7 +74,7 @@ type compressOpts struct {
 	Codec      string // h264|h265|copy
 	CRF        int    // CPU encoders quality
 	Preset     string // ultrafast..placebo (CPU encoders)
-	Scale      string // e.g. 1280:-2 or 1920:1080
+	Scale      string // e.g. 1280:-2 or 1920:1080 (fixed WxH). Leave empty to auto.
 	FPS        int    // force output fps if >0
 	Audio      string // aac|opus|copy
 	AB         string // audio bitrate (e.g. 128k)
@@ -128,11 +128,12 @@ func chooseSpeedBySize(sizeMB int64) string {
 func (o *compressOpts) applySpeedMode() {
 	switch o.SpeedMode {
 	case "turbo":
-		// Soft-fast turbo: default to 720p (in build), AAC stereo
+		// Soft-fast turbo: AAC stereo, orientation-safe 720p long-edge handled in buildFFmpegArgs
 		o.CRF = 34
 		o.Preset = "ultrafast"
 		o.AB = "96k"
 	case "max":
+		// Very small/fast: orientation-safe 480p long-edge handled in buildFFmpegArgs
 		o.CRF = 36
 		o.Preset = "ultrafast"
 		o.AB = "64k"
@@ -177,7 +178,7 @@ func (o *compressOpts) applyResolution() {
 	case "2160p":
 		o.Scale = "3840:2160"
 	case "original":
-		// keep original
+		// keep original (Scale empty)
 	default:
 		// unknown -> keep original
 	}
@@ -196,7 +197,7 @@ func (o *compressOpts) tinyInputSafety(fileSize int64) {
 	}
 }
 
-// ffmpeg args
+// ffmpeg args (orientation‑aware for turbo/max)
 func buildFFmpegArgs(inPath, outPath string, o compressOpts) []string {
 	// Base flags; try HW decode on mac when enabled
 	args := []string{"-y", "-hide_banner", "-loglevel", "error"}
@@ -205,35 +206,46 @@ func buildFFmpegArgs(inPath, outPath string, o compressOpts) []string {
 	}
 	args = append(args, "-i", inPath)
 
-	// Turbo defaults: 720p @ 24fps if user didn't set them
-	if o.SpeedMode == "turbo" {
-		if o.Scale == "" && strings.ToLower(o.Codec) != "copy" {
-			o.Scale = "1280:720"
-		}
-		if o.FPS == 0 {
-			o.FPS = 24
+	// ---------------------------
+	// ORIENTATION-SAFE SCALING
+	// ---------------------------
+	// For turbo/max we cap the LONG EDGE and preserve orientation:
+	// a = iw/ih (aspect). Use -2 to keep even dimensions.
+	//   turbo longEdge=720:  landscape -> h=720 (w auto), portrait -> w=720 (h auto)
+	//   max   longEdge=480:  landscape -> h=480 (w auto), portrait -> w=480 (h auto)
+	vf := ""
+	if strings.ToLower(o.Codec) != "copy" {
+		switch o.SpeedMode {
+		case "turbo":
+			if o.FPS == 0 {
+				o.FPS = 24
+			}
+			vf = "scale='if(gt(a,1),-2,720)':'if(gt(a,1),720,-2)':flags=fast_bilinear,setsar=1"
+		case "max":
+			if o.FPS == 0 {
+				o.FPS = 24
+			}
+			vf = "scale='if(gt(a,1),-2,480)':'if(gt(a,1),480,-2)':flags=fast_bilinear,setsar=1"
+		default:
+			// Respect explicit fixed WxH if provided (e.g. from Resolution),
+			// otherwise don't add a scale filter.
+			if o.Scale != "" {
+				vf = "scale=" + o.Scale + ":flags=fast_bilinear,setsar=1"
+			}
 		}
 	}
-	// Max defaults: 480p @ 24fps if user didn't set them
-	if o.SpeedMode == "max" {
-		if o.Scale == "" && strings.ToLower(o.Codec) != "copy" {
-			o.Scale = "854:480"
-		}
-		if o.FPS == 0 {
-			o.FPS = 24
-		}
+	if vf != "" {
+		args = append(args, "-vf", vf)
 	}
 
-	// scale
-	if o.Scale != "" && strings.ToLower(o.Codec) != "copy" {
-		args = append(args, "-vf", "scale="+o.Scale+":flags=fast_bilinear")
-	}
 	// fps (only if re-encoding video)
 	if o.FPS > 0 && strings.ToLower(o.Codec) != "copy" {
 		args = append(args, "-r", strconv.Itoa(o.FPS))
 	}
 
-	// codec
+	// ---------------------------
+	// VIDEO CODEC
+	// ---------------------------
 	vcodec := ""
 	switch strings.ToLower(o.Codec) {
 	case "copy":
@@ -277,14 +289,14 @@ func buildFFmpegArgs(inPath, outPath string, o compressOpts) []string {
 			default:
 				bitrate = "1500k"
 			}
-			// Turbo a bit higher for decent 720p
+			// Turbo a bit higher for decent 720p long-edge
 			if o.SpeedMode == "turbo" {
 				bitrate = "2500k"
 			}
 			args = append(args, "-b:v", bitrate)
 		}
 
-		// browser compatibility
+		// browser/player compatibility
 		if strings.ToLower(o.OutExt) == ".mp4" {
 			args = append(args, "-pix_fmt", "yuv420p")
 		}
@@ -307,7 +319,9 @@ func buildFFmpegArgs(inPath, outPath string, o compressOpts) []string {
 		}
 	}
 
-	// audio
+	// ---------------------------
+	// AUDIO
+	// ---------------------------
 	switch strings.ToLower(o.Audio) {
 	case "copy":
 		args = append(args, "-c:a", "copy")
@@ -418,15 +432,15 @@ kbd{background:#f3f4f6;border:1px solid #e5e7eb;border-radius:4px;padding:2px 6p
       <label>Mode</label>
       <select name="speed">
         <option value="ai" selected>AI (auto by size)</option>
-        <option value="turbo">TURBO (very fast, 720p)</option>
-        <option value="max">MAX (very fast, 480p)</option>
+        <option value="turbo">TURBO (very fast, 720p long-edge)</option>
+        <option value="max">MAX (very fast, 480p long-edge)</option>
         <option value="ultra_fast">Ultra Fast</option>
         <option value="super_fast">Super Fast</option>
         <option value="fast">Fast</option>
         <option value="balanced">Balanced</option>
         <option value="quality">Quality</option>
       </select>
-      <small>No time budget. AI picks by file size only.</small>
+      <small>AI picks by file size only.</small>
     </div>
     <div class="card">
       <label>Resolution</label>
@@ -811,7 +825,7 @@ func health(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"ok":        true,
 		"service":   "videocompress",
-		"version":   "3.1.0-timed",
+		"version":   "3.2.0-orientation",
 		"modes":     []string{"ai", "turbo", "max", "ultra_fast", "super_fast", "fast", "balanced", "quality"},
 		"defaults":  map[string]any{"codec": "h264", "resolution": "original", "hw": "none"},
 		"ui_routes": []string{"/", "/compress (POST)", "/dl/{id}", "/meta/{id}"},
