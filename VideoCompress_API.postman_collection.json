@@ -1,0 +1,480 @@
+{
+	"info": {
+		"_postman_id": "videocompress-api-collection",
+		"name": "VideoCompress API",
+		"description": "Complete API collection for the VideoCompress HTTP server with all endpoints and examples.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "videocompress"
+	},
+	"item": [
+		{
+			"name": "Health Check",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/health",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"health"
+					]
+				},
+				"description": "Check server status and get available features"
+			},
+			"response": []
+		},
+		{
+			"name": "Web Interface",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						""
+					]
+				},
+				"description": "Get the web interface HTML for browser-based video compression"
+			},
+			"response": []
+		},
+		{
+			"name": "Compress Video - AI Mode",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/octet-stream",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{
+							"key": "file",
+							"type": "file",
+							"src": [],
+							"description": "Video file to compress"
+						},
+						{
+							"key": "speed",
+							"value": "ai",
+							"type": "text",
+							"description": "AI mode - automatically selects optimal settings based on file size"
+						}
+					]
+				},
+				"url": {
+					"raw": "{{base_url}}/compress",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"compress"
+					]
+				},
+				"description": "Compress video using AI mode (automatic settings based on file size)"
+			},
+			"response": []
+		},
+		{
+			"name": "Compress Video - Turbo Mode",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/octet-stream",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{
+							"key": "file",
+							"type": "file",
+							"src": [],
+							"description": "Video file to compress"
+						},
+						{
+							"key": "speed",
+							"value": "turbo",
+							"type": "text",
+							"description": "Turbo mode - very fast, 720p long-edge"
+						}
+					]
+				},
+				"url": {
+					"raw": "{{base_url}}/compress",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"compress"
+					]
+				},
+				"description": "Compress video using turbo mode for maximum speed"
+			},
+			"response": []
+		},
+		{
+			"name": "Compress Video - Balanced Mode",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/octet-stream",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{
+							"key": "file",
+							"type": "file",
+							"src": [],
+							"description": "Video file to compress"
+						},
+						{
+							"key": "speed",
+							"value": "balanced",
+							"type": "text",
+							"description": "Balanced mode - good balance of speed and quality"
+						},
+						{
+							"key": "resolution",
+							"value": "720p",
+							"type": "text",
+							"description": "Output resolution"
+						}
+					]
+				},
+				"url": {
+					"raw": "{{base_url}}/compress",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"compress"
+					]
+				},
+				"description": "Compress video using balanced mode with 720p resolution"
+			},
+			"response": []
+		},
+		{
+			"name": "Compress Video - Quality Mode",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/octet-stream",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{
+							"key": "file",
+							"type": "file",
+							"src": [],
+							"description": "Video file to compress"
+						},
+						{
+							"key": "speed",
+							"value": "quality",
+							"type": "text",
+							"description": "Quality mode - high quality compression"
+						},
+						{
+							"key": "resolution",
+							"value": "1080p",
+							"type": "text",
+							"description": "Output resolution"
+						},
+						{
+							"key": "codec",
+							"value": "h265",
+							"type": "text",
+							"description": "Video codec (H.265 for better compression)"
+						}
+					]
+				},
+				"url": {
+					"raw": "{{base_url}}/compress",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"compress"
+					]
+				},
+				"description": "Compress video using quality mode with H.265 codec"
+			},
+			"response": []
+		},
+		{
+			"name": "Compress Video - Hardware Acceleration",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/octet-stream",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{
+							"key": "file",
+							"type": "file",
+							"src": [],
+							"description": "Video file to compress"
+						},
+						{
+							"key": "speed",
+							"value": "fast",
+							"type": "text",
+							"description": "Fast mode"
+						},
+						{
+							"key": "hw",
+							"value": "videotoolbox",
+							"type": "text",
+							"description": "Hardware acceleration (macOS only)"
+						}
+					]
+				},
+				"url": {
+					"raw": "{{base_url}}/compress",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"compress"
+					]
+				},
+				"description": "Compress video using hardware acceleration (macOS VideoToolbox)"
+			},
+			"response": []
+		},
+		{
+			"name": "Compress Video - Custom Settings",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/octet-stream",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{
+							"key": "file",
+							"type": "file",
+							"src": [],
+							"description": "Video file to compress"
+						},
+						{
+							"key": "speed",
+							"value": "balanced",
+							"type": "text",
+							"description": "Compression speed mode"
+						},
+						{
+							"key": "resolution",
+							"value": "480p",
+							"type": "text",
+							"description": "Output resolution"
+						},
+						{
+							"key": "codec",
+							"value": "h264",
+							"type": "text",
+							"description": "Video codec"
+						},
+						{
+							"key": "audio",
+							"value": "aac",
+							"type": "text",
+							"description": "Audio codec"
+						},
+						{
+							"key": "hw",
+							"value": "none",
+							"type": "text",
+							"description": "Hardware acceleration"
+						},
+						{
+							"key": "outExt",
+							"value": ".mp4",
+							"type": "text",
+							"description": "Output file extension"
+						},
+						{
+							"key": "fps",
+							"value": "30",
+							"type": "text",
+							"description": "Force output frame rate"
+						}
+					]
+				},
+				"url": {
+					"raw": "{{base_url}}/compress",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"compress"
+					]
+				},
+				"description": "Compress video with custom settings for all parameters"
+			},
+			"response": []
+		},
+		{
+			"name": "Compress Video - Web UI Response",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{
+							"key": "file",
+							"type": "file",
+							"src": [],
+							"description": "Video file to compress"
+						},
+						{
+							"key": "speed",
+							"value": "ai",
+							"type": "text",
+							"description": "AI mode"
+						},
+						{
+							"key": "ui",
+							"value": "1",
+							"type": "text",
+							"description": "Return web UI response instead of file"
+						}
+					]
+				},
+				"url": {
+					"raw": "{{base_url}}/compress",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"compress"
+					]
+				},
+				"description": "Compress video and return web UI response with download link"
+			},
+			"response": []
+		},
+		{
+			"name": "Download Compressed File",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/dl/{{file_id}}?name=compressed_video.mp4",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"dl",
+						"{{file_id}}"
+					],
+					"query": [
+						{
+							"key": "name",
+							"value": "compressed_video.mp4",
+							"description": "Custom filename for download"
+						}
+					]
+				},
+				"description": "Download a compressed file from the temporary store (web UI flow only)"
+			},
+			"response": []
+		},
+		{
+			"name": "Get Compression Metadata",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/meta/{{file_id}}",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"meta",
+						"{{file_id}}"
+					]
+				},
+				"description": "Get metadata for a compressed file (web UI flow only)"
+			},
+			"response": []
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					"// Auto-save response headers for file_id variable",
+					"if (pm.request.url.path.includes('compress') && pm.request.method === 'POST') {",
+					"    pm.sendRequest({",
+					"        url: pm.request.url,",
+					"        method: 'POST',",
+					"        header: pm.request.headers,",
+					"        body: pm.request.body",
+					"    }, function (err, response) {",
+					"        if (!err && response.code === 200) {",
+					"            // Extract file_id from response if it's HTML (web UI mode)",
+					"            const responseText = response.text();",
+					"            const match = responseText.match(/href=\"\\/dl\\/([a-f0-9]+)/);",
+					"            if (match) {",
+					"                pm.environment.set('file_id', match[1]);",
+					"                console.log('File ID extracted:', match[1]);",
+					"            }",
+					"        }",
+					"    });",
+					"}"
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8080",
+			"type": "string"
+		},
+		{
+			"key": "file_id",
+			"value": "",
+			"type": "string"
+		}
+	]
+}
