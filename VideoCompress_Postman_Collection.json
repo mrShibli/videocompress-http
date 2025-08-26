@@ -1,0 +1,275 @@
+{
+	"info": {
+		"_postman_id": "videocompress-api-collection",
+		"name": "VideoCompress API",
+		"description": "Complete API collection for VideoCompress HTTP server",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Health Check",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:8080/health",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "8080",
+					"path": [
+						"health"
+					]
+				},
+				"description": "Check server status and get available features"
+			},
+			"response": []
+		},
+		{
+			"name": "Compress Video - API Mode (Get File)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/octet-stream",
+						"description": "This header tells the server to return the compressed file instead of HTML UI"
+					}
+				],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{
+							"key": "file",
+							"type": "file",
+							"src": [],
+							"description": "Video file to compress"
+						},
+						{
+							"key": "speed",
+							"value": "ai",
+							"description": "Compression speed mode: ai, turbo, max, ultra_fast, super_fast, fast, balanced, quality"
+						},
+						{
+							"key": "resolution",
+							"value": "original",
+							"description": "Output resolution: original, 360p, 480p, 720p, 1080p, 1440p, 2160p"
+						},
+						{
+							"key": "codec",
+							"value": "h264",
+							"description": "Video codec: h264, h265, copy"
+						},
+						{
+							"key": "audio",
+							"value": "aac",
+							"description": "Audio codec: aac, opus, copy"
+						},
+						{
+							"key": "hw",
+							"value": "none",
+							"description": "Hardware acceleration: none, videotoolbox"
+						}
+					]
+				},
+				"url": {
+					"raw": "http://localhost:8080/compress",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "8080",
+					"path": [
+						"compress"
+					]
+				},
+				"description": "Compress video and get the compressed file directly. Use Accept: application/octet-stream header."
+			},
+			"response": []
+		},
+		{
+			"name": "Compress Video - API Mode (api=1 parameter)",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{
+							"key": "file",
+							"type": "file",
+							"src": [],
+							"description": "Video file to compress"
+						},
+						{
+							"key": "speed",
+							"value": "ai",
+							"description": "Compression speed mode"
+						},
+						{
+							"key": "api",
+							"value": "1",
+							"description": "This parameter triggers API mode to return file instead of UI"
+						}
+					]
+				},
+				"url": {
+					"raw": "http://localhost:8080/compress",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "8080",
+					"path": [
+						"compress"
+					]
+				},
+				"description": "Alternative way to get compressed file using api=1 parameter instead of Accept header"
+			},
+			"response": []
+		},
+		{
+			"name": "Compress Video - UI Mode (Get HTML)",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{
+							"key": "file",
+							"type": "file",
+							"src": [],
+							"description": "Video file to compress"
+						},
+						{
+							"key": "speed",
+							"value": "ai",
+							"description": "Compression speed mode"
+						},
+						{
+							"key": "ui",
+							"value": "1",
+							"description": "Explicitly request UI mode"
+						}
+					]
+				},
+				"url": {
+					"raw": "http://localhost:8080/compress",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "8080",
+					"path": [
+						"compress"
+					]
+				},
+				"description": "Compress video and get HTML result page with download links (default behavior)"
+			},
+			"response": []
+		},
+		{
+			"name": "Download Compressed File",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:8080/dl/{{file_id}}?name={{filename}}",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "8080",
+					"path": [
+						"dl",
+						"{{file_id}}"
+					],
+					"query": [
+						{
+							"key": "name",
+							"value": "{{filename}}",
+							"description": "Optional custom filename for download"
+						}
+					]
+				},
+				"description": "Download a compressed file from the temporary store (web UI flow only)"
+			},
+			"response": []
+		},
+		{
+			"name": "Get File Metadata",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:8080/meta/{{file_id}}",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "8080",
+					"path": [
+						"meta",
+						"{{file_id}}"
+					]
+				},
+				"description": "Get metadata for a compressed file (web UI flow only)"
+			},
+			"response": []
+		},
+		{
+			"name": "Web Interface",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:8080/",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "8080",
+					"path": [
+						""
+					]
+				},
+				"description": "Access the web interface for video compression"
+			},
+			"response": []
+		},
+		{
+			"name": "API Documentation",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:8080/api-docs",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "8080",
+					"path": [
+						"api-docs"
+					]
+				},
+				"description": "View the API documentation"
+			},
+			"response": []
+		}
+	],
+	"variable": [
+		{
+			"key": "file_id",
+			"value": "abc123def456",
+			"description": "File ID from compression result (UI mode)"
+		},
+		{
+			"key": "filename",
+			"value": "compressed_video.mp4",
+			"description": "Custom filename for download"
+		}
+	]
+}
